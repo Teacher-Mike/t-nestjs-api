@@ -1,0 +1,86 @@
+name: Evaluate NestJS Exam
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  autograding:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nestjs
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Lint code
+        id: lint-test
+        run: npm run lint
+
+      - name: Run tests
+        id: unit-test
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nestjs
+        run: npm run test
+
+      - name: Build Docker images
+        run: docker-compose build
+
+      - name: Start Docker containers
+        run: docker-compose up -d
+
+      - name: Wait for services to be ready
+        run: sleep 20
+
+      - name: Test application health
+        id: health-check
+        run: curl -f http://localhost:3000/health
+
+      - name: Test CRUD functionality
+        id: crud-test
+        run: |
+          curl -X POST http://localhost:3000/user \
+            -H "Content-Type: application/json" \
+            -d '{"name": "Test User", "email": "test@example.com"}'
+          curl -X GET http://localhost:3000/user
+
+      - name: Autograding Reporter
+        uses: classroom-resources/autograding-grading-reporter@v1
+        with:
+          runners: lint-test,unit-test,health-check,crud-test
+        env:
+          LINT_TEST_RESULTS: ${{ steps.lint-test.outputs.result }}
+          UNIT_TEST_RESULTS: ${{ steps.unit-test.outputs.result }}
+          HEALTH_CHECK_RESULTS: ${{ steps.health-check.outputs.result }}
+          CRUD_TEST_RESULTS: ${{ steps.crud-test.outputs.result }}
+
+      - name: Stop Docker containers
+        run: docker-compose down
